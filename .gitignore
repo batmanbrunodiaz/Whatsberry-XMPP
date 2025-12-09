@@ -1,0 +1,53 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# APK builds
+*.apk
+app/build/
+app/.gradle/
+
+# Logs
+logs/
+*.log
+
+# Audio cache
+audio_cache/
+src/audio_cache/
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+
+# Credentials (IMPORTANTE: NO subir keystores)
+*.keystore
+*.jks
+whatsberry.keystore
+
+# Android Studio
+local.properties
+.gradle/
+.idea/
+*.iml
+
+# Prosody/XMPP
+.whatsapp-session/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Session data
+sessions/
+.sessions/
