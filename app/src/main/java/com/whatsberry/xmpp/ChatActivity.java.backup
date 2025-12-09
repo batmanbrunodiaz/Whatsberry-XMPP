@@ -1,0 +1,851 @@
+package com.whatsberry.xmpp;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
+import android.provider.MediaStore;
+import android.util.Log;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.ListView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Chat Activity
+ * Chat screen for messaging with a contact
+ */
+public class ChatActivity extends Activity {
+    private static final int PICK_FILE_REQUEST = 1;
+    private static final int CAMERA_PHOTO_REQUEST = 2;
+    private static final int CAMERA_VIDEO_REQUEST = 3;
+
+    private ListView lvMessages;
+    private EditText etMessage;
+    private Button btnSend, btnAttach, btnCamera, btnVideo, btnAudio;
+    private TextView tvContactName;
+
+    private Uri photoUri;
+    private Uri videoUri;
+
+    private XMPPManager xmppManager;
+    private FileUploadManager fileUploadManager;
+    private MessagesAdapter adapter;
+    private List<ChatMessage> messages;
+
+    private String contactJid;
+    private String contactName;
+
+    // Audio recording
+    private android.media.MediaRecorder mediaRecorder;
+    private String audioFilePath;
+    private boolean isRecording = false;
+
+    // Audio playback
+    private android.media.MediaPlayer mediaPlayer;
+    private String currentlyPlayingUrl;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_chat);
+
+        xmppManager = XMPPManager.getInstance();
+        fileUploadManager = FileUploadManager.getInstance();
+        fileUploadManager.setConnection(xmppManager.getConnection());
+
+        // Get contact info from intent
+        contactJid = getIntent().getStringExtra("contactJid");
+        contactName = getIntent().getStringExtra("contactName");
+
+        if (contactJid == null) {
+            Toast.makeText(this, "Error: No contact specified", Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+
+        initializeViews();
+        setupListeners();
+        setupMessageListener();
+        loadMessageHistory();
+    }
+
+    private void initializeViews() {
+        lvMessages = (ListView) findViewById(R.id.lvMessages);
+        etMessage = (EditText) findViewById(R.id.etMessage);
+        btnSend = (Button) findViewById(R.id.btnSend);
+        btnAttach = (Button) findViewById(R.id.btnAttach);
+        btnCamera = (Button) findViewById(R.id.btnCamera);
+        btnVideo = (Button) findViewById(R.id.btnVideo);
+        btnAudio = (Button) findViewById(R.id.btnAudio);
+        tvContactName = (TextView) findViewById(R.id.tvContactName);
+
+        tvContactName.setText(contactName != null ? contactName : contactJid);
+
+        messages = new ArrayList<>();
+        adapter = new MessagesAdapter();
+        lvMessages.setAdapter(adapter);
+    }
+
+    private void setupListeners() {
+        btnSend.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                sendMessage();
+            }
+        });
+
+        btnAttach.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                openFilePicker();
+            }
+        });
+
+        btnCamera.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                takePhoto();
+            }
+        });
+
+        btnVideo.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                takeVideo();
+            }
+        });
+
+        btnAudio.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (isRecording) {
+                    stopRecording();
+                } else {
+                    startRecording();
+                }
+            }
+        });
+    }
+
+    private void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*"); // All files
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(intent, "Select File"), PICK_FILE_REQUEST);
+        } catch (Exception e) {
+            Toast.makeText(this, "Please install a file manager", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void takePhoto() {
+        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            // Create a file to store the photo
+            try {
+                File photoFile = createImageFile();
+                if (photoFile != null) {
+                    photoUri = Uri.fromFile(photoFile);
+                    intent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri);
+                    startActivityForResult(intent, CAMERA_PHOTO_REQUEST);
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Error creating photo file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Toast.makeText(this, "No camera app found", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void takeVideo() {
+        Intent intent = new Intent(MediaStore.ACTION_VIDEO_CAPTURE);
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            // Create a file to store the video
+            try {
+                File videoFile = createVideoFile();
+                if (videoFile != null) {
+                    videoUri = Uri.fromFile(videoFile);
+                    intent.putExtra(MediaStore.EXTRA_OUTPUT, videoUri);
+                    intent.putExtra(MediaStore.EXTRA_VIDEO_QUALITY, 1); // High quality
+                    intent.putExtra(MediaStore.EXTRA_DURATION_LIMIT, 60); // 60 seconds max
+                    startActivityForResult(intent, CAMERA_VIDEO_REQUEST);
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Error creating video file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        } else {
+            Toast.makeText(this, "No camera app found", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private File createImageFile() throws Exception {
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(android.os.Environment.DIRECTORY_PICTURES);
+
+        if (storageDir != null && !storageDir.exists()) {
+            storageDir.mkdirs();
+        }
+
+        return File.createTempFile(imageFileName, ".jpg", storageDir);
+    }
+
+    private File createVideoFile() throws Exception {
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String videoFileName = "MP4_" + timeStamp + "_";
+        File storageDir = getExternalFilesDir(android.os.Environment.DIRECTORY_MOVIES);
+
+        if (storageDir != null && !storageDir.exists()) {
+            storageDir.mkdirs();
+        }
+
+        return File.createTempFile(videoFileName, ".mp4", storageDir);
+    }
+
+    private void startRecording() {
+        try {
+            // Create audio file
+            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            File storageDir = getExternalFilesDir(android.os.Environment.DIRECTORY_MUSIC);
+
+            if (storageDir != null && !storageDir.exists()) {
+                storageDir.mkdirs();
+            }
+
+            File audioFile = new File(storageDir, "AUDIO_" + timeStamp + ".3gp");
+            audioFilePath = audioFile.getAbsolutePath();
+
+            // Initialize MediaRecorder
+            mediaRecorder = new android.media.MediaRecorder();
+            mediaRecorder.setAudioSource(android.media.MediaRecorder.AudioSource.MIC);
+            mediaRecorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.THREE_GPP);
+            mediaRecorder.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AMR_NB);
+            mediaRecorder.setOutputFile(audioFilePath);
+
+            mediaRecorder.prepare();
+            mediaRecorder.start();
+
+            isRecording = true;
+            btnAudio.setText("⏹"); // Stop icon
+            Toast.makeText(this, "Recording...", Toast.LENGTH_SHORT).show();
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to start recording: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            isRecording = false;
+            if (mediaRecorder != null) {
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+        }
+    }
+
+    private void stopRecording() {
+        try {
+            if (mediaRecorder != null) {
+                mediaRecorder.stop();
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+
+            isRecording = false;
+            btnAudio.setText("🎤"); // Microphone icon
+
+            // Upload the recorded audio
+            if (audioFilePath != null) {
+                File audioFile = new File(audioFilePath);
+                if (audioFile.exists()) {
+                    Toast.makeText(this, "Uploading audio...", Toast.LENGTH_SHORT).show();
+                    uploadAndSendFile(audioFile);
+                } else {
+                    Toast.makeText(this, "Audio file not found", Toast.LENGTH_SHORT).show();
+                }
+            }
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to stop recording: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            isRecording = false;
+            btnAudio.setText("🎤");
+            if (mediaRecorder != null) {
+                mediaRecorder.release();
+                mediaRecorder = null;
+            }
+        }
+    }
+
+    private void playAudio(final String audioUrl) {
+        try {
+            // If already playing this URL, stop it
+            if (currentlyPlayingUrl != null && currentlyPlayingUrl.equals(audioUrl)) {
+                stopAudio();
+                return;
+            }
+
+            // Stop any currently playing audio
+            stopAudio();
+
+            // Initialize MediaPlayer
+            mediaPlayer = new android.media.MediaPlayer();
+            mediaPlayer.setAudioStreamType(android.media.AudioManager.STREAM_MUSIC);
+
+            // Set data source (URL)
+            mediaPlayer.setDataSource(audioUrl);
+
+            // Prepare async
+            mediaPlayer.setOnPreparedListener(new android.media.MediaPlayer.OnPreparedListener() {
+                @Override
+                public void onPrepared(android.media.MediaPlayer mp) {
+                    mp.start();
+                    currentlyPlayingUrl = audioUrl;
+                    Toast.makeText(ChatActivity.this, "Playing audio...", Toast.LENGTH_SHORT).show();
+                }
+            });
+
+            // Handle completion
+            mediaPlayer.setOnCompletionListener(new android.media.MediaPlayer.OnCompletionListener() {
+                @Override
+                public void onCompletion(android.media.MediaPlayer mp) {
+                    stopAudio();
+                }
+            });
+
+            // Handle errors
+            mediaPlayer.setOnErrorListener(new android.media.MediaPlayer.OnErrorListener() {
+                @Override
+                public boolean onError(android.media.MediaPlayer mp, int what, int extra) {
+                    Toast.makeText(ChatActivity.this, "Error playing audio", Toast.LENGTH_SHORT).show();
+                    stopAudio();
+                    return true;
+                }
+            });
+
+            mediaPlayer.prepareAsync();
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to play audio: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            stopAudio();
+        }
+    }
+
+    private void stopAudio() {
+        if (mediaPlayer != null) {
+            try {
+                if (mediaPlayer.isPlaying()) {
+                    mediaPlayer.stop();
+                }
+                mediaPlayer.release();
+            } catch (Exception e) {
+                // Ignore errors during cleanup
+            }
+            mediaPlayer = null;
+        }
+        currentlyPlayingUrl = null;
+    }
+
+    private void openFile(String fileUrl) {
+        try {
+            String lowerUrl = fileUrl.toLowerCase();
+            Intent intent;
+
+            if (lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+                lowerUrl.endsWith(".png") || lowerUrl.endsWith(".gif")) {
+                // Open image in ImageViewerActivity
+                intent = new Intent(this, ImageViewerActivity.class);
+                intent.putExtra("IMAGE_URL", fileUrl);
+                startActivity(intent);
+
+            } else if (lowerUrl.endsWith(".mp4") || lowerUrl.endsWith(".3gp") ||
+                      lowerUrl.endsWith(".webm")) {
+                // Open video in VideoPlayerActivity
+                intent = new Intent(this, VideoPlayerActivity.class);
+                intent.putExtra("VIDEO_URL", fileUrl);
+                startActivity(intent);
+
+            } else if (lowerUrl.endsWith(".mp3") || lowerUrl.endsWith(".ogg") ||
+                      lowerUrl.endsWith(".m4a") || lowerUrl.endsWith(".opus") ||
+                      lowerUrl.contains("format=mp3")) {
+                // Open audio in VoicePlayerActivity
+                // Add ?format=mp3 for opus/ogg conversion (BB10 compatibility)
+                String audioUrl = fileUrl;
+                if (!audioUrl.contains("format=mp3")) {
+                    if (audioUrl.contains("?")) {
+                        audioUrl += "&format=mp3";
+                    } else {
+                        audioUrl += "?format=mp3";
+                    }
+                }
+                intent = new Intent(this, VoicePlayerActivity.class);
+                intent.putExtra("AUDIO_URL", audioUrl);
+                startActivity(intent);
+
+            } else {
+                // Fallback to system viewer for other files
+                intent = new Intent(Intent.ACTION_VIEW);
+                intent.setData(Uri.parse(fileUrl));
+                startActivity(intent);
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Cannot open file: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            Log.e("ChatActivity", "Error opening file", e);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == PICK_FILE_REQUEST && resultCode == RESULT_OK) {
+            if (data != null) {
+                Uri fileUri = data.getData();
+                String filePath = getFilePathFromUri(fileUri);
+                if (filePath != null) {
+                    File file = new File(filePath);
+                    uploadAndSendFile(file);
+                } else {
+                    Toast.makeText(this, "Could not access file", Toast.LENGTH_SHORT).show();
+                }
+            }
+        } else if (requestCode == CAMERA_PHOTO_REQUEST && resultCode == RESULT_OK) {
+            // Photo taken successfully
+            if (photoUri != null) {
+                String filePath = photoUri.getPath();
+                if (filePath != null) {
+                    File photoFile = new File(filePath);
+                    if (photoFile.exists()) {
+                        uploadAndSendFile(photoFile);
+                    } else {
+                        Toast.makeText(this, "Photo file not found", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            } else {
+                Toast.makeText(this, "Failed to capture photo", Toast.LENGTH_SHORT).show();
+            }
+        } else if (requestCode == CAMERA_VIDEO_REQUEST && resultCode == RESULT_OK) {
+            // Video recorded successfully
+            if (videoUri != null) {
+                String filePath = videoUri.getPath();
+                if (filePath != null) {
+                    File videoFile = new File(filePath);
+                    if (videoFile.exists()) {
+                        uploadAndSendFile(videoFile);
+                    } else {
+                        Toast.makeText(this, "Video file not found", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            } else {
+                Toast.makeText(this, "Failed to record video", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private String getFilePathFromUri(Uri uri) {
+        String filePath = null;
+        String[] projection = {MediaStore.Images.Media.DATA};
+        Cursor cursor = getContentResolver().query(uri, projection, null, null, null);
+        if (cursor != null) {
+            if (cursor.moveToFirst()) {
+                int columnIndex = cursor.getColumnIndex(projection[0]);
+                filePath = cursor.getString(columnIndex);
+            }
+            cursor.close();
+        }
+
+        // Fallback for direct file paths
+        if (filePath == null) {
+            filePath = uri.getPath();
+        }
+
+        return filePath;
+    }
+
+    private void uploadAndSendFile(final File file) {
+        Toast.makeText(this, "Uploading " + file.getName() + "...", Toast.LENGTH_SHORT).show();
+
+        fileUploadManager.uploadFile(file, new FileUploadManager.UploadCallback() {
+            @Override
+            public void onUploadSuccess(String downloadUrl) {
+                // Send file via XMPP with OOB (Out of Band Data)
+                xmppManager.sendFileMessage(contactJid, downloadUrl, file.getName(), new XMPPManager.MessageCallback() {
+                    @Override
+                    public void onMessageReceived(String from, String message) {
+                        // Not used
+                    }
+
+                    @Override
+                    public void onMessageSent() {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(ChatActivity.this, "File sent!", Toast.LENGTH_SHORT).show();
+                                // Add file message to chat
+                                ChatMessage msg = new ChatMessage();
+                                msg.text = file.getName();
+                                msg.isSent = true;
+                                msg.timestamp = System.currentTimeMillis();
+                                msg.fileUrl = downloadUrl;
+                                msg.isFile = true;
+                                msg.status = MessageStatus.DELIVERED;
+                                messages.add(msg);
+                                adapter.notifyDataSetChanged();
+                                lvMessages.setSelection(adapter.getCount() - 1);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onMessageError(String error) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(ChatActivity.this, "Failed to send: " + error, Toast.LENGTH_SHORT).show();
+                            }
+                        });
+                    }
+                });
+            }
+
+            @Override
+            public void onUploadError(String error) {
+                Toast.makeText(ChatActivity.this, "Upload failed: " + error, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void setupMessageListener() {
+        xmppManager.setMessageCallback(new XMPPManager.MessageCallback() {
+            @Override
+            public void onMessageReceived(String from, String message) {
+                // Check if message is from current contact
+                if (from.contains(contactJid) || from.startsWith(contactJid)) {
+                    addMessage(message, false);
+                }
+            }
+
+            @Override
+            public void onMessageSent() {
+                // Message sent confirmation handled in sendMessage()
+            }
+
+            @Override
+            public void onMessageError(String error) {
+                Toast.makeText(ChatActivity.this, "Error: " + error, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void loadMessageHistory() {
+        // Load last 50 messages
+        xmppManager.loadMessageHistory(contactJid, 50, new XMPPManager.MessageHistoryCallback() {
+            @Override
+            public void onHistoryLoaded(List<XMPPManager.HistoricalMessage> historyMessages) {
+                // Add historical messages to the chat
+                for (XMPPManager.HistoricalMessage histMsg : historyMessages) {
+                    ChatMessage msg = new ChatMessage();
+                    msg.text = histMsg.body;
+                    msg.isSent = histMsg.isSent;
+                    msg.timestamp = histMsg.timestamp;
+                    msg.status = histMsg.isSent ? MessageStatus.DELIVERED : null;
+
+                    // Set file fields if this is a multimedia message
+                    if (histMsg.fileUrl != null && !histMsg.fileUrl.isEmpty()) {
+                        msg.fileUrl = histMsg.fileUrl;
+                        msg.isFile = true;
+                    }
+
+                    messages.add(msg);
+                }
+
+                // Update UI
+                adapter.notifyDataSetChanged();
+
+                // Scroll to bottom
+                lvMessages.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (adapter.getCount() > 0) {
+                            lvMessages.setSelection(adapter.getCount() - 1);
+                        }
+                    }
+                });
+
+                Toast.makeText(ChatActivity.this,
+                        "Loaded " + historyMessages.size() + " messages",
+                        Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onHistoryError(String error) {
+                Toast.makeText(ChatActivity.this,
+                        "Could not load history: " + error,
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void sendMessage() {
+        final String messageText = etMessage.getText().toString().trim();
+
+        if (messageText.isEmpty()) {
+            Toast.makeText(this, "Please enter a message", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Clear input immediately
+        etMessage.setText("");
+
+        // Add to local list
+        addMessage(messageText, true);
+        final int messageIndex = messages.size() - 1;
+
+        // Send via XMPP
+        xmppManager.sendMessage(contactJid, messageText, new XMPPManager.MessageCallback() {
+            @Override
+            public void onMessageReceived(String from, String message) {
+                // Not used here
+            }
+
+            @Override
+            public void onMessageSent() {
+                // Message sent successfully - update status to DELIVERED
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (messageIndex >= 0 && messageIndex < messages.size()) {
+                            messages.get(messageIndex).status = MessageStatus.DELIVERED;
+                            adapter.notifyDataSetChanged();
+                        }
+                    }
+                });
+            }
+
+            @Override
+            public void onMessageError(String error) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        Toast.makeText(ChatActivity.this,
+                                "Failed to send: " + error, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void addMessage(String text, boolean isSent) {
+        ChatMessage msg = new ChatMessage();
+        msg.isSent = isSent;
+        msg.timestamp = System.currentTimeMillis();
+        msg.status = isSent ? MessageStatus.SENDING : null; // Sent messages start as SENDING
+
+        // Detect if message is a file URL
+        boolean isUrl = text.startsWith("http://") || text.startsWith("https://");
+        boolean isMediaUrl = isUrl && (
+            text.contains("/attachments/") ||
+            text.endsWith(".jpg") || text.endsWith(".jpeg") || text.endsWith(".png") ||
+            text.endsWith(".gif") || text.endsWith(".mp4") || text.endsWith(".3gp") ||
+            text.endsWith(".mp3") || text.endsWith(".ogg") || text.endsWith(".m4a")
+        );
+
+        if (isMediaUrl) {
+            // This is a file URL
+            msg.fileUrl = text;
+            msg.isFile = true;
+            // Extract filename from URL
+            String filename = text.substring(text.lastIndexOf("/") + 1);
+            msg.text = filename;
+        } else {
+            // Regular text message
+            msg.text = text;
+            msg.isFile = false;
+        }
+
+        messages.add(msg);
+        adapter.notifyDataSetChanged();
+
+        // Scroll to bottom
+        lvMessages.post(new Runnable() {
+            @Override
+            public void run() {
+                lvMessages.setSelection(adapter.getCount() - 1);
+            }
+        });
+    }
+
+    private boolean isAudioFile(String url) {
+        if (url == null) return false;
+        String lowerUrl = url.toLowerCase();
+        return lowerUrl.endsWith(".mp3") || lowerUrl.endsWith(".ogg") ||
+               lowerUrl.endsWith(".m4a") || lowerUrl.endsWith(".3gp") ||
+               lowerUrl.endsWith(".aac") || lowerUrl.endsWith(".opus") ||
+               lowerUrl.endsWith(".webm") || lowerUrl.contains("convert_audio");
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // Clean up audio resources
+        stopAudio();
+        // Clean up recording resources
+        if (mediaRecorder != null) {
+            try {
+                mediaRecorder.release();
+            } catch (Exception e) {
+                // Ignore
+            }
+            mediaRecorder = null;
+        }
+    }
+
+    // Message model
+    private static class ChatMessage {
+        String text;
+        boolean isSent;
+        long timestamp;
+        String fileUrl; // URL for image/file attachments
+        boolean isFile; // true if this is a file/image message
+        MessageStatus status; // Message delivery status (sent/delivered/read)
+    }
+
+    // Message status enum
+    private enum MessageStatus {
+        SENDING,    // ⏱ Message being sent
+        SENT,       // ✓ Message sent to server
+        DELIVERED,  // ✓✓ Message delivered to recipient
+        READ        // ✓✓ (blue) Message read by recipient
+    }
+
+    // Custom adapter for messages with proper bubble alignment
+    private class MessagesAdapter extends ArrayAdapter<ChatMessage> {
+        MessagesAdapter() {
+            super(ChatActivity.this, 0, messages);
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            ChatMessage msg = messages.get(position);
+
+            // Use different layouts for sent vs received messages
+            int layoutId = msg.isSent ? R.layout.item_message_sent : R.layout.item_message_received;
+
+            View view = convertView;
+            // Only reuse view if it's the same type
+            if (view != null) {
+                int currentLayoutId = (Integer) view.getTag();
+                if (currentLayoutId != layoutId) {
+                    view = null;
+                }
+            }
+
+            if (view == null) {
+                view = getLayoutInflater().inflate(layoutId, parent, false);
+                view.setTag(layoutId);
+            }
+
+            TextView tvMessageText = (TextView) view.findViewById(R.id.tvMessageText);
+            TextView tvMessageTime = (TextView) view.findViewById(R.id.tvMessageTime);
+            TextView tvMessageStatus = (TextView) view.findViewById(R.id.tvMessageStatus);
+
+            // Handle different types of files
+            if (msg.isFile && msg.fileUrl != null) {
+                final String fileUrl = msg.fileUrl;
+                String lowerUrl = fileUrl.toLowerCase();
+
+                if (isAudioFile(fileUrl)) {
+                    // Audio file - make it clickable to play
+                    view.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            playAudio(fileUrl);
+                        }
+                    });
+                    tvMessageText.setText("🎵 " + msg.text + " (tap to play)");
+
+                } else if (lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+                          lowerUrl.endsWith(".png") || lowerUrl.endsWith(".gif")) {
+                    // Image file - show image icon and make clickable
+                    view.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            openFile(fileUrl);
+                        }
+                    });
+                    tvMessageText.setText("🖼 " + msg.text + " (tap to view)");
+
+                } else if (lowerUrl.endsWith(".mp4") || lowerUrl.endsWith(".3gp") ||
+                          lowerUrl.endsWith(".webm")) {
+                    // Video file - show video icon and make clickable
+                    view.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            openFile(fileUrl);
+                        }
+                    });
+                    tvMessageText.setText("🎬 " + msg.text + " (tap to view)");
+
+                } else {
+                    // Other file - show document icon and make clickable
+                    view.setOnClickListener(new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            openFile(fileUrl);
+                        }
+                    });
+                    tvMessageText.setText("📎 " + msg.text + " (tap to open)");
+                }
+            } else {
+                // Regular text message
+                tvMessageText.setText(msg.text);
+                view.setOnClickListener(null);
+            }
+
+            String time = new SimpleDateFormat("HH:mm", Locale.getDefault()).format(new Date(msg.timestamp));
+            tvMessageTime.setText(time);
+
+            // Update message status (only for sent messages)
+            if (tvMessageStatus != null && msg.isSent) {
+                String statusIcon = "";
+                int statusColor = 0xFF666666; // Default gray
+
+                if (msg.status != null) {
+                    switch (msg.status) {
+                        case SENDING:
+                            statusIcon = "⏱";
+                            statusColor = 0xFF999999;
+                            break;
+                        case SENT:
+                            statusIcon = "✓";
+                            statusColor = 0xFF666666;
+                            break;
+                        case DELIVERED:
+                            statusIcon = "✓✓";
+                            statusColor = 0xFF666666;
+                            break;
+                        case READ:
+                            statusIcon = "✓✓";
+                            statusColor = 0xFF34B7F1; // WhatsApp blue
+                            break;
+                    }
+                } else {
+                    statusIcon = "✓"; // Default to sent
+                }
+
+                tvMessageStatus.setText(statusIcon);
+                tvMessageStatus.setTextColor(statusColor);
+            }
+
+            return view;
+        }
+    }
+}

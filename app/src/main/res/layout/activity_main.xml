@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:background="#FFFFFF">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="WhatsApp XMPP Client"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"
+            android:textColor="#075E54"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="for BlackBerry 10"
+            android:textSize="14sp"
+            android:layout_marginBottom="12dp"
+            android:textColor="#666666"/>
+
+        <!-- Database Settings Button -->
+        <Button
+            android:id="@+id/btnDatabaseSettings"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Database Settings"
+            android:textColor="#FFFFFF"
+            android:background="#666666"
+            android:padding="8dp"
+            android:textSize="11sp"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Server Configuration"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"
+            android:textColor="#333333"/>
+
+        <EditText
+            android:id="@+id/etServer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Server (e.g. xmpp.example.com)"
+            android:inputType="text"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:background="#F5F5F5"/>
+
+        <EditText
+            android:id="@+id/etPort"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Port (default: 5222)"
+            android:inputType="number"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:background="#F5F5F5"/>
+
+        <EditText
+            android:id="@+id/etDomain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Domain (usually same as server)"
+            android:inputType="text"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:background="#F5F5F5"/>
+
+        <EditText
+            android:id="@+id/etGateway"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Gateway (e.g. whatsapp.localhost)"
+            android:inputType="text"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:background="#F5F5F5"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Account Credentials"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"
+            android:textColor="#333333"/>
+
+        <EditText
+            android:id="@+id/etUsername"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Username"
+            android:inputType="text"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:background="#F5F5F5"/>
+
+        <EditText
+            android:id="@+id/etPassword"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Password"
+            android:inputType="textPassword"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"
+            android:background="#F5F5F5"/>
+
+        <Button
+            android:id="@+id/btnConnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Connect and Login"
+            android:textColor="#FFFFFF"
+            android:background="#075E54"
+            android:padding="16dp"
+            android:layout_marginBottom="8dp"/>
+
+        <Button
+            android:id="@+id/btnRegister"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Register New Account"
+            android:textColor="#FFFFFF"
+            android:background="#25D366"
+            android:padding="16dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="v2.0.0 - XMPP Edition"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginTop="24dp"
+            android:textColor="#999999"/>
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,83 @@
+# WhatsBerry Server - Full Docker Compose Stack
+#
+# ⚠️  WARNING: This configuration is UNTESTED
+#
+# For a TESTED production setup, use docker-compose-hybrid.yml instead
+# or follow the "Hybrid Setup" guide in SERVER_SETUP.md
+#
+# This file runs all three services (Prosody, Slidge, Proxy) in Docker.
+# The hybrid setup (Prosody + Proxy as systemd, Slidge in Docker) is
+# production-tested and recommended.
+
+version: '3.8'
+
+services:
+  prosody:
+    image: prosody/prosody:0.12
+    container_name: whatsberry-prosody
+    hostname: prosody
+    ports:
+      - "5200:5200"  # XMPP internal port (no TLS)
+    volumes:
+      - ./prosody-config:/etc/prosody:ro
+      - prosody-data:/var/lib/prosody
+    environment:
+      - LOCAL=localhost
+      - DOMAIN=whatsberry.descarga.media  # Change this to your domain
+      - ADMIN=admin@whatsberry.descarga.media
+    restart: unless-stopped
+    networks:
+      - whatsberry-net
+    healthcheck:
+      test: ["CMD", "prosodyctl", "check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  slidge-whatsapp:
+    image: nicoco/slidge-whatsapp:latest
+    container_name: whatsberry-slidge
+    hostname: slidge
+    depends_on:
+      - prosody
+    volumes:
+      - slidge-data:/var/lib/slidge
+    environment:
+      - SLIDGE_JID=whatsapp.localhost
+      - SLIDGE_SECRET=your-secret-change-this  # CHANGE THIS!
+      - SLIDGE_XMPP_HOST=prosody
+      - SLIDGE_XMPP_PORT=5200
+    restart: unless-stopped
+    networks:
+      - whatsberry-net
+
+  xmpp-proxy:
+    image: node:16-alpine
+    container_name: whatsberry-proxy
+    hostname: proxy
+    ports:
+      - "5222:5222"  # Public XMPP port with STARTTLS for BB10
+    volumes:
+      - ./xmpp-starttls-proxy.js:/app/proxy.js:ro
+    working_dir: /app
+    command: node proxy.js
+    depends_on:
+      - prosody
+    restart: unless-stopped
+    networks:
+      - whatsberry-net
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "5222"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  whatsberry-net:
+    driver: bridge
+
+volumes:
+  prosody-data:
+    driver: local
+  slidge-data:
+    driver: local

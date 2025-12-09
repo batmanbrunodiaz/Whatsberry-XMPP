@@ -1,0 +1,85 @@
+# WhatsBerry Server - Hybrid Docker Compose
+#
+# ✅ TESTED & RECOMMENDED
+#
+# This is the production-tested configuration used by whatsberry.descarga.media
+#
+# Architecture:
+# - Prosody XMPP Server: systemd service (installed separately)
+# - Slidge WhatsApp Gateway: Docker container (THIS FILE)
+# - XMPP STARTTLS Proxy: systemd service (installed separately)
+#
+# Prerequisites:
+# 1. Prosody must be installed and running as systemd service
+#    - Listening on port 5200 (c2s)
+#    - Listening on port 5347 (component)
+#    - See SERVER_SETUP.md for Prosody installation
+#
+# 2. XMPP STARTTLS Proxy must be installed and running as systemd service
+#    - Listening on port 5222 (public STARTTLS)
+#    - Forwarding to localhost:5200
+#    - See SERVER_SETUP.md for proxy installation
+#
+# 3. Create config file: ~/.local/share/slidge/slidge.conf
+#
+# Usage:
+#   docker-compose -f docker-compose-hybrid.yml up -d
+#   docker-compose -f docker-compose-hybrid.yml logs -f
+
+version: '3.8'
+
+services:
+  slidge-whatsapp:
+    image: codeberg.org/slidge/slidge-whatsapp:latest-amd64
+    container_name: slidge-whatsapp
+    hostname: slidge
+
+    # IMPORTANT: network_mode: host allows container to access localhost:5347
+    # This is required for connecting to Prosody's component port
+    network_mode: host
+
+    volumes:
+      # Config and data directory
+      - ${HOME}/.local/share/slidge:/data
+
+    # Command arguments
+    command: ["-c", "/data/slidge.conf"]
+
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "slidge-whatsapp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# No volumes or networks needed - using host network and host filesystem
+
+---
+
+# Example slidge.conf file (create at ~/.local/share/slidge/slidge.conf):
+#
+# [global]
+# jid = whatsapp.localhost
+# secret = YOUR_SECRET_HERE  # Must match Prosody component_secret
+# server = localhost
+# port = 5347
+# home-dir = /data
+# debug = true
+#
+# # Allow users from your domain
+# user-jid-validator = ^.*@(localhost|your-domain\.com)(/.*)?$
+#
+# # File attachments (optional)
+# no-upload-path = /data/attachments
+# no-upload-url-prefix = https://your-domain.com/attachments/
+# no-upload-method = copy
